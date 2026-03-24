@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
+const { createServer } = require('http');
+const { initWebsocketService } = require('./services/websocketService');
+const { setSyncWebsocketEmitter } = require('./services/syncService');
 
 // Load environment variables
 dotenv.config();
@@ -15,14 +18,30 @@ const transactionRoutes = require('./routes/transactions');
 const acoRoutes = require('./routes/aco');
 const federatedLearningRoutes = require('./routes/federatedLearning');
 
+
 // Initialize Express app
 const app = express();
+const server = createServer(app);
+const websocketService = initWebsocketService(server);
+setSyncWebsocketEmitter((userId, event, data) => websocketService.emitToUser(userId, event, data));
 
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Global Security Middlewares
+app.use(securityPerformanceTracker);
+app.use(checkBlacklist);
+app.use(ddosProtection);
+app.use(botDetection);
+app.use(advancedRestrictions);
+app.use(requestSanitizer);
+app.use(globalLimiter);
+
+// For authenticated routes, you might want to switch to tieredRateLimiter
+// but globalLimiter works as a safe default for all requests.
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -38,6 +57,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/aco', acoRoutes);
 app.use('/api/federated-learning', federatedLearningRoutes);
+
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -58,6 +78,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Security Pulse / Status (Admin only)
+app.get('/api/admin/security/pulse', authenticateToken, requireAdmin, async (req, res) => {
+  const pulse = await securityService.getSecurityPulse();
+  res.json({
+    success: true,
+    data: pulse
+  });
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -70,7 +99,7 @@ app.use('*', (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  
+
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal server error',
@@ -83,34 +112,36 @@ const transactionQueue = require('./services/transactionQueue');
 const transactionProcessor = require('./workers/transactionProcessor');
 const transactionEvents = require('./events/transactionEvents');
 
-// Start server
 const PORT = process.env.PORT || 3001;
 
-async function startServer() {
+async function startServer () {
   try {
     // Initialize transaction system components
     await transactionQueue.initialize();
     await transactionProcessor.initialize();
     await transactionEvents.initialize();
-    
+
     // Start transaction processing
     await transactionQueue.startProcessing();
     await transactionProcessor.start();
     await transactionEvents.startListening();
-    
-    app.listen(PORT, () => {
+
+    server.listen(PORT, () => {
       console.log(`🚀 StarkEd Education Backend running on port ${PORT}`);
       console.log(`📚 Quiz Management API available at /api/quizzes`);
       console.log(`📊 Event Logger API available at /api/events`);
       console.log(`🔄 Sync API available at /api/sync`);
       console.log(`📁 Content Management API available at /api/content`);
       console.log(`💰 Transaction Queue API available at /api/transactions`);
+<<<<<<< HEAD
       console.log(`🐜 Ant Colony Optimization API available at /api/aco`);
       console.log(`🤖 Federated Learning API available at /api/federated-learning`);
+=======
+
+>>>>>>> 8767e30ac64adcc36c8978d2fad7d64ea42ab465
       console.log(`🏥 Health check available at /api/health`);
       console.log(`✅ Transaction Queue System initialized successfully`);
     });
-    
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
@@ -134,6 +165,9 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;
+module.exports.server = server;
